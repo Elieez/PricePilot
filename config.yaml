@@ -1,0 +1,29 @@
+discord_webhook: "${{ secrets.DISCORD_WEBHOOK }}"
+
+# Default output currency
+currency_output: SEK
+fx:
+  provider: exchangerate_host
+  refresh_hours: 24
+  symbols: [SEK, EUR, USD, GBP, DKK, NOK]
+
+run:
+  sample_limit_per_run: 30
+  jitter_ms: [800, 1600]
+
+#Global filters (can overrider per monitor)
+filters:
+  include_brands: []
+  exclude_brands: ["new look", "pull&bear"]
+  require_discount_pct: 0
+
+monitors:
+  - name: "ASOS (men)"
+    slug: "asos-men"
+    adapter: "asos"
+    listing_urls:
+      - "https://www.asos.com/men/shoes-trainers/sneakers/cat/?sort=priceasc"
+    filters: 
+      exclude_brands: ["asos design", "river island"]
+      include_brands: []
+      require_discount_pct: 20
