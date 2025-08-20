@@ -26,4 +26,4 @@ monitors:
     filters: 
       exclude_brands: ["asos design", "river island"]
       include_brands: []
-      require_discount_pct: 20
+      require_discount_pct: 0
