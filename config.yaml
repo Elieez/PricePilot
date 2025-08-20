@@ -22,7 +22,7 @@ monitors:
     slug: "asos-men"
     adapter: "asos"
     listing_urls:
-      - "https://www.asos.com/men/shoes-trainers/sneakers/cat/?sort=priceasc"
+      - "https://www.asos.com/se/man/nyheter/cat/?cid=27110&currentpricerange=115-6320&sort=priceasc"
     filters: 
       exclude_brands: ["asos design", "river island"]
       include_brands: []
