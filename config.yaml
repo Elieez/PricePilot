@@ -19,7 +19,7 @@ filters:
 
 monitors:
   - name: "ASOS (men)"
-    slug: "asos-men-test"
+    slug: "asos-men"
     adapter: "asos"
     listing_urls:
       - "https://www.asos.com/se/man/nyheter/cat/?cid=27110&currentpricerange=115-6320&sort=priceasc"
