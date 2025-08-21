@@ -1,6 +1,6 @@
 import json, re
 from typing import List, Dict, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qsl, urlencode
 import httpx
 from bs4 import BeautifulSoup
 
@@ -43,108 +43,196 @@ class AsosAdapter(BaseAdapter):
     BASE = "https://www.asos.com"
 
     def discover_urls(self, listing_url: str, limit: int) -> List[str]:
-        html = self._get_html(listing_url)
-        soup = BeautifulSoup(html, "lxml")
-        out = []
-        for a in soup.select("a[href*='/prd/']"):
-            href = a.get("href")
-            if not href:
-                continue
-            if href.startswith("//"):
-                href = "https:" + href
-            elif href.startswith("/"):
-                href = self.BASE + href
-            url = href.split("?")[0]
-            if "/prd/" in url:
-                out.append(url)
-            if len(out) >= limit:
-                break
-        seen, dedup = set(), []
-        for u in out:
-            if u in seen:
-                continue
-            seen.add(u)
-            dedup.append(u)
-        return dedup
+    """
+    Collect up to `limit` unique product URLs.
+
+    Control variant handling from config:
+      unique_by: "product" (default) or "variant"
+      keep_query_params: ["colourWayId","clr"]  # used when unique_by="variant"
+    """
+    unique_by = (self.cfg.get("unique_by") or "product").lower()
+    keep_params = [p.lower() for p in (self.cfg.get("keep_query_params") or ["colourWayId", "clr"])]
+
+    def canon(u: str) -> str:
+        # absolutize
+        if u.startswith("//"):
+            u2 = "https:" + u
+        elif u.startswith("/"):
+            u2 = self.BASE + u
+        else:
+            u2 = u
+
+        if unique_by == "product":
+            return u2.split("?", 1)[0]
+
+        # variant-aware: keep only selected query params, stable order
+        parts = urlsplit(u2)
+        qs = parse_qsl(parts.query, keep_blank_values=True)
+        kept = [(k, v) for (k, v) in qs if k.lower() in keep_params]
+        new_q = urlencode(kept, doseq=True) if kept else ""
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_q, parts.fragment))
+
+    html = self._get_html(listing_url)
+    soup = BeautifulSoup(html, "lxml")
+
+    seen, out = set(), []
+    for a in soup.select("a[href*='/prd/']"):
+        href = a.get("href")
+        if not href:
+            continue
+        url = canon(href)
+        if "/prd/" not in url or url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
+        if len(out) >= limit:
+            break
+    return out
 
     def fetch_offer(self, product_url: str) -> Optional[Dict]:
-        html = self._get_html(product_url)
-        soup = BeautifulSoup(html, "lxml")
-        title = None
-        brand = None
-        price_cents = None
-        prev_price_cents = None
-        currency = None
-        rating = None
-        review_count = None
+    html = self._get_html(product_url)
+    soup = BeautifulSoup(html, "lxml")
+    title = None
+    brand = None
+    price_cents = None
+    prev_price_cents = None
+    currency = None
+    rating = None
+    review_count = None
+    image_url = None
 
-        # JSON-LD blocks (most reliable)
-        for tag in soup.find_all("script", {"type": "application/ld+json"}):
-            try:
-                data = json.loads(tag.string or "")
-            except Exception:
+    # --- JSON-LD blocks ---
+    for tag in soup.find_all("script", {"type": "application/ld+json"}):
+        try:
+            data = json.loads(tag.string or "")
+        except Exception:
+            continue
+        nodes = data if isinstance(data, list) else [data]
+        for node in nodes:
+            if node.get("@type") != "Product":
                 continue
-            nodes = data if isinstance(data, list) else [data]
-            for node in nodes:
-                if node.get("@type") == "Product":
-                    title = title or node.get("name")
-                    # brand may be object or string
-                    b = node.get("brand")
-                    if isinstance(b, dict):
-                        brand = brand or b.get("name")
-                    elif isinstance(b, str):
-                        brand = brand or b
 
-                    offers = node.get("offers") or {}
-                    if isinstance(offers, list):
-                        offers = offers[0] if offers else {}
-                    price = offers.get("price") or (offers.get("priceSpecification") or {}).get("price")
-                    currency = currency or offers.get("priceCurrency") or (offers.get("priceSpecification") or {}).get("priceCurrency")
-                    if price and price_cents is None:
-                        price_cents = _normalize_price_to_cents(str(price))
+            title = title or node.get("name")
 
+            # brand: object or string
+            b = node.get("brand")
+            if isinstance(b, dict):
+                brand = brand or b.get("name")
+            elif isinstance(b, str):
+                brand = brand or b
 
-                    # ratings
-                    ar = node.get("aggregateRating") or {}
-                    try:
-                        rating = float(ar.get("ratingValue")) if ar.get("ratingValue") else rating
-                    except Exception:
-                        pass
-                    try:
-                        review_count = int(ar.get("reviewCount")) if ar.get("reviewCount") else review_count
-                    except Exception:
-                        pass
+            # image: string | list | ImageObject
+            img = node.get("image")
+            if isinstance(img, list):
+                for v in img:
+                    if isinstance(v, str) and not image_url:
+                        image_url = v; break
+                    if isinstance(v, dict) and not image_url:
+                        image_url = v.get("url"); break
+            elif isinstance(img, dict):
+                image_url = image_url or img.get("url")
+            elif isinstance(img, str):
+                image_url = image_url or img
 
+            # offers: support AggregateOffer and priceSpecification
+            offers = node.get("offers") or {}
+            if isinstance(offers, list):
+                offers = offers[0] if offers else {}
 
-        # Previous/was price (DOM hints)
-        prev_el = soup.select_one("[data-testid='previous-price'], .previous-price, .price .previous, .rrp")
-        if prev_el:
-            m = re.search("[0-9.,]+", prev_el.get_text(" ", strip=True))
-            if m:
-                prev_price_cents = _normalize_price_to_cents(m.group(0))
+            price = (
+                offers.get("price")
+                or (offers.get("priceSpecification") or {}).get("price")
+                or offers.get("lowPrice")
+                or offers.get("highPrice")
+            )
+            currency = currency or (
+                offers.get("priceCurrency")
+                or (offers.get("priceSpecification") or {}).get("priceCurrency")
+            )
+            if price and price_cents is None:
+                price_cents = _normalize_price_to_cents(str(price))
 
+            # ratings (if present)
+            ar = node.get("aggregateRating") or {}
+            try:
+                rating = float(ar.get("ratingValue")) if ar.get("ratingValue") else rating
+            except Exception:
+                pass
+            try:
+                review_count = int(ar.get("reviewCount")) if ar.get("reviewCount") else review_count
+            except Exception:
+                pass
 
-        # Fallbacks
-        if not title:
-            t = soup.select_one("h1, [data-auto-id='productTitle']")
-            if t:
-                title = t.get_text(strip=True)
-        if not currency:
-            currency = "EUR"
+    # Fallback: Open Graph image
+    if not image_url:
+        for prop in ("og:image:secure_url", "og:image"):
+            og = soup.select_one(f"meta[property='{prop}']")
+            if og and og.get("content"):
+                image_url = og["content"]; break
 
+    # Normalize image URL
+    if image_url:
+        if image_url.startswith("//"):
+            image_url = "https:" + image_url
+        elif image_url.startswith("/"):
+            image_url = self.BASE + image_url
 
-        if price_cents:
-            return {
-                "title": title or product_url,
-                "brand": brand,
-                "price_cents": price_cents,
-                "prev_price_cents": prev_price_cents,
-                "currency": currency,
-                "rating": rating,
-                "review_count": review_count,
-                "url": product_url,
-            }
-        return None
+    # Previous/was price (DOM hints)
+    prev_el = soup.select_one(
+        "[data-testid='previous-price'], .previous-price, .price .previous, .rrp, .old-price, .was-price, del, s"
+    )
+    if prev_el:
+        m = re.search(r"[0-9.,]+", prev_el.get_text(" ", strip=True))
+        if m:
+            prev_price_cents = _normalize_price_to_cents(m.group(0))
+
+    # Fallback: current price from DOM if JSON-LD missed it
+    if price_cents is None:
+        price_candidates = soup.select(
+            "[data-testid='current-price'], "
+            "[data-auto-id='productPrice'], "
+            "[data-auto-id='product-price'], "
+            ".current-price, .price .current, [class*='currentPrice']"
+        )
+        for el in price_candidates:
+            txt = el.get_text(" ", strip=True)
+            m = re.search(r"[\d\s.,]+", txt)
+            if not m:
+                continue
+            maybe = _normalize_price_to_cents(m.group(0))
+            if maybe:
+                price_cents = maybe
+                low = txt.lower()
+                if not currency:
+                    if "sek" in low or " kr" in low:
+                        currency = "SEK"
+                    elif "€" in low:
+                        currency = "EUR"
+                    elif "$" in low:
+                        currency = "USD"
+                break
+
+    # Fallbacks
+    if not title:
+        t = soup.select_one("h1, [data-auto-id='productTitle']")
+        if t:
+            title = t.get_text(strip=True)
+    if not currency:
+        currency = "EUR"
+
+    if price_cents:
+        return {
+            "title": title or product_url,
+            "brand": brand,
+            "price_cents": price_cents,
+            "prev_price_cents": prev_price_cents,
+            "currency": currency,
+            "rating": rating,
+            "review_count": review_count,
+            "image_url": image_url,
+            "url": product_url,
+        }
+    return None
 
 
 class StaticCssAdapter(BaseAdapter):
@@ -161,7 +249,7 @@ class StaticCssAdapter(BaseAdapter):
             href = a.get("href")
             if not href:
                 continue
-            if self.cfg.get("absolute:urls"):
+            if self.cfg.get("absolute_urls"):
                 url = href
             else:
                 url = urljoin(self.cfg.get("site_base", ""), href)

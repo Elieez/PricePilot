@@ -207,7 +207,6 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
                 seen.add(url)
                 changed = True
                 continue
-
             # Currency conversion (default to SEK output)
             price_cents = offer.get("price_cents")
             cur_code = (offer.get("currency") or "").upper()
@@ -241,8 +240,8 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
                 ).strip(),
                 "footer": {"text": monitor["name"]},
             }
-            if img_url:
-                embed["thumbnail"] = {"url": img_url}
+            if offer.get("image_url"):
+                embed["image"] = {"url": offer["image_url"]}
 
             send_discord(webhook, embed=embed, userName="PricePilot")
 

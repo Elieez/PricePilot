@@ -16,6 +16,8 @@ filters:
   include_brands: []
   exclude_brands: ["new look", "pull&bear"]
   require_discount_pct: 0
+  unique_by: "variant"
+  keep_query_params: ["colourWayId","clr"]
 
 monitors:
   - name: "ASOS (men)"
