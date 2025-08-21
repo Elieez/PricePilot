@@ -92,11 +92,24 @@ def save_state(slug: str, state: Dict):
     p.write_text(json.dumps(state, ensure_ascii=False, indent=2))
 
 
-def send_discord(webhook_url: str, content: str):
+def send_discord(webhook_url: str,
+                 content: str | None = None,
+                 embed: dict | None = None,
+                 userName: str | None = None,
+                 avatar: str | None = None):
     if not webhook_url:
-        print("[DRY ALERT]", content)
+        print("[DRY ALERT]", content or embed)
         return
-    httpx.post(webhook_url, json={"content": content}, timeout=15)
+    payload = {}
+    if content: 
+        payload["content"] = content
+    if embed: 
+        payload["embeds"] = [embed]
+    if userName:
+        payload["username"] = userName
+    if avatar:
+        payload["avatar_url"] = avatar
+    httpx.post(webhook_url, json=payload, timeout=15)
 
 
 # ---------------- Filtering ----------------
@@ -197,13 +210,17 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
 
             # Currency conversion (default to SEK output)
             price_cents = offer.get("price_cents")
-            cur = (offer.get("currency") or "").upper()
-            sek_cents = to_sek_cents(price_cents, cur, fx) if want_sek else None
+            cur_code = (offer.get("currency") or "").upper()
+            sek_cents = to_sek_cents(price_cents, cur_code, fx) if want_sek else None
 
-            if want_sek and sek_cents is not None:
-                price_str = f"{sek_cents/100:.0f} SEK (original {price_cents/100:.2f} {cur})"
-            else:
-                price_str = f"{price_cents/100:.2f} {cur or ''}".strip()
+            orig_str = f"{price_cents/100:.2f} {cur_code}" if isinstance(price_cents, int) else "(price n/a)"
+
+            if want_sek and isinstance(sek_cents, int):
+                price_str = f"{sek_cents/100:.0f} SEK"
+                if isinstance(price_cents, int):
+                    price_str += f" (orig {orig_str})"
+            else: 
+                price_str = orig_str
 
             brand_str = f" | {offer.get('brand')}" if offer.get("brand") else ""
             
@@ -219,7 +236,8 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
                 "title": offer.get("title") or "New item",
                 "url": url,
                 "description": (
-                    f"{offer.get('brand') or ''} • {price_str}" + (f" • ↓{drop_pct}%" if drop_pct is not None else "")
+                    f"{offer.get('brand') or ''} • {price_str}"
+                    + (f" • ↓{drop_pct}%" if drop_pct is not None else "")
                 ).strip(),
                 "footer": {"text": monitor["name"]},
             }
