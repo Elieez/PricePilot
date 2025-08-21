@@ -210,8 +210,8 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
             drop_pct = None
             prev = offer.get("prev_price_cents")
             curp = offer.get("price_cents")
-            if prev and curp and prev > curp:
-                drop_pct = int(round((prev - curp) / prev * 100))
+            if isinstance(prev, int) and isinstance(curp, int) and prev > 0 and prev > curp:
+                drop_pct = int(round((prev - curp) * 100 / prev))
 
             img_url = offer.get("image_url")
 
