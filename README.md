@@ -31,13 +31,35 @@
    pip install -r requirements.txt
    ```
 
-3. **Configure Monitors**
+3. **Discord Webhook Setup**
+
+   In Discord, open the text channel where you want alerts → Edit Channel → Integrations → Webhooks → New Webhook → copy the webhook URL.
+
+   **GitHub Actions secret (recommended):**  
+   Repo → Settings → Secrets and variables → Actions → New repository secret
+
+   - Name: `DISCORD_WEBHOOK`
+   - Value: (paste the webhook URL)
+
+   **Local runs (optional):** set it as an env var (avoid committing secrets):
+
+   **macOS/Linux:**
+   ```sh
+   export DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+   ```
+
+   **Windows PowerShell:**
+   ```powershell
+   $env:DISCORD_WEBHOOK = "https://discord.com/api/webhooks/..."
+   ```
+
+4. **Configure Monitors**
    - Edit or create a configuration file (YAML or JSON) specifying:
      - The shops to monitor
      - Webhook URLs
      - Filters for brands, discounts, etc.
 
-4. **Run the Monitor**
+5. **Run the Monitor**
    ```sh
    python monitor.py
    ```
