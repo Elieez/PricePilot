@@ -60,10 +60,6 @@
 - **BeautifulSoup & lxml:** HTML parsing
 - **Discord Webhooks:** For alert notifications
 
-## License
-
-This project does not currently specify a license.
-
 ---
 
 *Repository: [Elieez/PricePilot](https://github.com/Elieez/PricePilot)*
