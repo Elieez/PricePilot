@@ -129,13 +129,25 @@ def discount_ok(offer: Dict, flt: Dict) -> bool:
     req = int(flt.get("require_discount_pct", 0) or 0)
     if req <= 0:
         return True
+
     cur = offer.get("price_cents")
     prev = offer.get("prev_price_cents")
-    if cur and prev and prev > cur:
-        drop = (prev - cur) / prev * 100
-        return drop >= req
-    # if we cannot determine discount, fail closed to avoid spam
-    return False
+
+    if cur is None:
+        # No current price parsed → block (safer)
+        return False
+
+    if prev is None:
+        # Fail-open when previous price is unknown (keep True).
+        # If you want to require a visible discount, change this to: return False
+        return True
+
+    if prev <= cur:
+        # No discount or price increased → block
+        return False
+
+    drop = (prev - cur) / prev * 100
+    return drop >= req
 
 
 # ---------------- Runner ----------------
@@ -189,18 +201,32 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
             sek_cents = to_sek_cents(price_cents, cur, fx) if want_sek else None
 
             if want_sek and sek_cents is not None:
-                price_str = f"{sek_cents/100:.0f} SEK (orig {price_cents/100:.2f} {cur})"
+                price_str = f"{sek_cents/100:.0f} SEK (original {price_cents/100:.2f} {cur})"
             else:
                 price_str = f"{price_cents/100:.2f} {cur or ''}".strip()
 
             brand_str = f" | {offer.get('brand')}" if offer.get("brand") else ""
-            msg = (
-                f"🆕 **{monitor['name']}**{brand_str}\n"
-                f"{offer.get('title') or 'New item'}\n"
-                f"{price_str}\n"
-                f"{url}"
-            )
-            send_discord(webhook, msg)
+            
+            drop_pct = None
+            prev = offer.get("prev_price_cents")
+            curp = offer.get("price_cents")
+            if prev and curp and prev > curp:
+                drop_pct = int(round((prev - curp) / prev * 100))
+
+            img_url = offer.get("image_url")
+
+            embed = {
+                "title": offer.get("title") or "New item",
+                "url": url,
+                "description": (
+                    f"{offer.get('brand') or ''} • {price_str}" + (f" • ↓{drop_pct}%" if drop_pct is not None else "")
+                ).strip(),
+                "footer": {"text": monitor["name"]},
+            }
+            if img_url:
+                embed["thumbnail"] = {"url": img_url}
+
+            send_discord(webhook, embed=embed, userName="PricePilot")
 
             seen.add(url)
             changed = True
