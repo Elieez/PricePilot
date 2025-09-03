@@ -1,4 +1,4 @@
-name: cheapmon
+name: PricePilot Monitor
 
 on:
   schedule:
