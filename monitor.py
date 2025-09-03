@@ -243,7 +243,7 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
             if offer.get("image_url"):
                 embed["image"] = {"url": offer["image_url"]}
 
-            send_discord(webhook, embed=embed, userName="PricePilot")
+            send_discord(webhook, embed=embed, userName="PricePilot", avatar="discord_avatar.png")
 
             seen.add(url)
             changed = True
