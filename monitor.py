@@ -1,7 +1,6 @@
 import os, json, time, random, sys
 from pathlib import Path
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
 import yaml
 import httpx
 from adapters import ADAPTERS
@@ -97,49 +96,20 @@ def send_discord(webhook_url: str,
                  content: str | None = None,
                  embed: dict | None = None,
                  userName: str | None = None,
-                 avatar: str | None = None) -> bool:
+                 avatar: str | None = None):
     if not webhook_url:
         print("[DRY ALERT]", content or embed)
-        return False 
-
-    payload: Dict[str, object] = {}
-    if content:
+        return
+    payload = {}
+    if content: 
         payload["content"] = content
-    if embed:
+    if embed: 
         payload["embeds"] = [embed]
     if userName:
         payload["username"] = userName
-
     if avatar:
-        avatar_str = avatar.strip()
-        parsed = urlparse(avatar_str)
-        if parsed.scheme in {"http", "https"}:
-            payload["avatar_url"] = avatar_str
-        else:
-            avatar_path = (ROOT / avatar_str)
-            if avatar_path.exists():
-                print(f"[discord] Ignoring avatar file '{avatar_path}'; provide an http(s) URL for webhook avatars.")
-            else:
-                print(f"[discord] Ignoring avatar value '{avatar_path}'; provide an http(s) URL for webhook avatars.")
-    
-    try: 
-        response = httpx.post(webhook_url, json=payload, timeout=15)
-        response.raise_for_status()
-        return True
-    except httpx.HTTPStatusError as exc:
-        body = ""
-        if exc.response is not None:
-            try:
-                body = exc.response.text.strip()
-            except Exception:
-                body = ""
-        msg = f"[discord] Webhook rejected payload (status {exc.response.status_code})."
-        if body:
-            msg += f" Response body: {body[:200]}"
-        print(msg)
-    except httpx.HTTPError as exc:
-        print(f"[discord] Webhook error: {exc}")
-        return False
+        payload["avatar_url"] = avatar
+    httpx.post(webhook_url, json=payload, timeout=15)
 
 
 # ---------------- Filtering ----------------
@@ -226,9 +196,6 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
         return False
 
     changed = False
-    username = monitor.get("discord_username") or cfg.get("discord_username") or "PricePilot"
-    avatar = monitor.get("discord_avatar_url") or cfg.get("discord_avatar_url")
-
     for url in new_urls:
         try:
             offer = adapter.fetch_offer(url) or {"title": url, "price_cents": None, "currency": ""}
@@ -276,12 +243,7 @@ def run_monitor(cfg: Dict, monitor: Dict, webhook: str, fx: Optional[Dict]):
             if offer.get("image_url"):
                 embed["image"] = {"url": offer["image_url"]}
 
-           sent = send_discord(webhook, embed=embed, userName=username, avatar=avatar_url)
-           if sent:
-                seen.add(url)
-                changed = True
-            else: 
-                print(f"[{slug}] Discord notification failed for {url}; will retry on next run.")
+            send_discord(webhook, embed=embed, userName="PricePilot")
 
             seen.add(url)
             changed = True
